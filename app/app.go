@@ -38,4 +38,5 @@ func (a *App) registerRoutes() {
 
 	a.Router.GET("/musics", musicHandler.GetMusics)
 	a.Router.GET("/musics/:playlistID", musicHandler.GetPlaylist)
+	a.Router.GET("/musics/:playlistID/tracks", musicHandler.GetPlaylistTracks)
 }
