@@ -51,12 +51,10 @@ func saveToken(rdb *redis.Client, ctx context.Context, key string, token string,
 
 // GET Spotify token
 func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, error) {
-	tokenVal, err := getToken(m.Redis, ctx, "spotify_token")
+	tokenVal, err := getToken(m.Redis, ctx, "spotify_user_access_token")
 	if err != nil {
-		return nil, fmt.Errorf("smth went wrong with redis while getting spt tkn %v", err)
+		return nil, err
 	}
-
-	fmt.Println(tokenVal)
 
 	if tokenVal != "" {
 		return &SpotifyToken{
@@ -64,22 +62,25 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 		}, nil
 	}
 
-	err = godotenv.Load()
-	if err != nil {
-		return nil, fmt.Errorf("failed to load .env")
-	}
+	_ = godotenv.Load()
 
 	clientID := os.Getenv("SPOTIFY_CLIENT_ID")
 	clientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
+	refreshToken := os.Getenv("SPOTIFY_REFRESH_TOKEN")
 
-	if clientID == "" || clientSecret == "" {
-		return nil, fmt.Errorf("missing Spotify credentials")
+	if clientID == "" || clientSecret == "" || refreshToken == "" {
+		return nil, fmt.Errorf("missing spotify env vars")
 	}
 
 	data := url.Values{}
-	data.Set("grant_type", "client_credentials")
+	data.Set("grant_type", "refresh_token")
+	data.Set("refresh_token", refreshToken)
 
-	req, err := http.NewRequest("POST", "https://accounts.spotify.com/api/token", strings.NewReader(data.Encode()))
+	req, err := http.NewRequest(
+		"POST",
+		"https://accounts.spotify.com/api/token",
+		strings.NewReader(data.Encode()),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +88,7 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", getAuthHeader(clientID, clientSecret))
 
-	client := &http.Client{}
-	res, err := client.Do(req)
+	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
-		return nil, fmt.Errorf("spotify error: %s", string(body))
+		return nil, fmt.Errorf("spotify token error: %s", body)
 	}
 
 	var token SpotifyToken
@@ -104,7 +104,8 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 		return nil, err
 	}
 
-	saveToken(m.Redis, ctx, "spotify_token", token.AccessToken, time.Duration(token.ExpiresIn)*time.Second)
+	ttl := time.Duration(token.ExpiresIn-60) * time.Second
+	_ = saveToken(m.Redis, ctx, "spotify_user_access_token", token.AccessToken, ttl)
 
 	return &token, nil
 }
@@ -257,4 +258,60 @@ func (m *MusicHandler) GetPlaylistTracks(ctx *gin.Context) {
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{"message": "success", "body": tracks})
+}
+
+func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
+	token, err := m.getSpotifyToken(ctx.Request.Context())
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	req, _ := http.NewRequest(
+		"GET",
+		"https://api.spotify.com/v1/me/player/recently-played?limit=1",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "spotify error"})
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": string(body)})
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read spotify response"})
+		return
+	}
+
+	log.Println("Spotify recently-played raw response:")
+	log.Println(string(bodyBytes))
+
+	var data RecentlyPlayedResponse
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(data.Items) == 0 {
+		ctx.JSON(http.StatusOK, gin.H{"message": "silence"})
+		return
+	}
+
+	item := data.Items[0]
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"track":     item.Track,
+		"played_at": item.PlayedAt,
+		"context":   item.Context,
+	})
 }

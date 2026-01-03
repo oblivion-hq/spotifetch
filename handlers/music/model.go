@@ -53,3 +53,23 @@ type Track struct {
 	Artists      []Artist     `json:"artists"`
 	Album        Album        `json:"album"`
 }
+
+type RecentlyPlayedItem struct {
+	Track    Track       `json:"track"`
+	PlayedAt string      `json:"played_at"`
+	Context  PlayContext `json:"context"`
+}
+
+type PlayContext struct {
+	Type         string       `json:"type"`
+	URI          string       `json:"uri"`
+	Href         string       `json:"href"`
+	ExternalUrls ExternalUrls `json:"external_urls"`
+}
+
+type RecentlyPlayedResponse struct {
+	Items []RecentlyPlayedItem `json:"items"`
+	Next  string               `json:"next"`
+	Limit int                  `json:"limit"`
+	Href  string               `json:"href"`
+}
