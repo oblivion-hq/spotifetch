@@ -22,8 +22,7 @@ func InitRedis(ctx context.Context) (*redis.Client, error) {
 		DB:       redis_db,
 	})
 
-	err := rdb.Set(ctx, "ping", "pong", 0).Err()
-	if err != nil {
+	if err := rdb.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("redis connection failed: %w", err)
 	}
 
@@ -34,7 +33,7 @@ func InitRouter() *gin.Engine {
 	router := gin.Default()
 
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:8081"},
+		AllowAllOrigins:  true,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},

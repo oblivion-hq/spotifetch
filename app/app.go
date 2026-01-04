@@ -36,8 +36,15 @@ func InitApp(ctx context.Context) (*App, error) {
 func (a *App) registerRoutes() {
 	musicHandler := music.NewMusicHandler(a.Redis)
 
+	a.Router.GET("/health", func(c *gin.Context) {
+		if err := a.Redis.Ping(c).Err(); err != nil {
+			c.JSON(500, gin.H{"status": "redis down"})
+			return
+		}
+		c.JSON(200, gin.H{"status": "ok"})
+	})
+
 	a.Router.GET("/musics", musicHandler.GetMusics)
 	a.Router.GET("/musics/:playlistID", musicHandler.GetPlaylist)
-	a.Router.GET("/musics/:playlistID/tracks", musicHandler.GetPlaylistTracks)
 	a.Router.GET("/me/player/recently-played", musicHandler.GetRecentlyPlayedMusic)
 }

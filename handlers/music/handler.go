@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -62,8 +61,6 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 		}, nil
 	}
 
-	_ = godotenv.Load()
-
 	clientID := os.Getenv("SPOTIFY_CLIENT_ID")
 	clientSecret := os.Getenv("SPOTIFY_CLIENT_SECRET")
 	refreshToken := os.Getenv("SPOTIFY_REFRESH_TOKEN")
@@ -88,6 +85,20 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", getAuthHeader(clientID, clientSecret))
 
+	// lockKey := "spotify:token:lock"
+
+	// ok, err := m.Redis.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
+	// if err != nil {
+	// 	return nil, err
+	// }
+
+	// if !ok {
+	// 	time.Sleep(200 * time.Millisecond)
+	// 	return m.getSpotifyToken(ctx)
+	// }
+
+	// defer m.Redis.Del(ctx, lockKey)
+
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -110,19 +121,28 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	return &token, nil
 }
 
+func handleErr(ctx *gin.Context, err error) {
+	log.Println("handler error:", err)
+	ctx.JSON(http.StatusInternalServerError, gin.H{
+		"error": "internal server error",
+	})
+}
+
 // GET my playlist
 func (m *MusicHandler) GetMusics(ctx *gin.Context) {
 	token, err := m.getSpotifyToken(ctx.Request.Context())
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 
-	req, err := http.NewRequest("GET", "https://api.spotify.com/v1/playlists/0cwPcui7aGHkmfHZiD3Hb9", nil)
+	req, err := http.NewRequest(
+		"GET",
+		"https://api.spotify.com/v1/playlists/0cwPcui7aGHkmfHZiD3Hb9",
+		nil,
+	)
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 
@@ -130,11 +150,12 @@ func (m *MusicHandler) GetMusics(ctx *gin.Context) {
 
 	req.Header.Set("Authorization", authStr)
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 	defer res.Body.Close()
@@ -164,8 +185,7 @@ func (m *MusicHandler) GetPlaylist(ctx *gin.Context) {
 
 	token, err := m.getSpotifyToken(ctx.Request.Context())
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 
@@ -173,8 +193,7 @@ func (m *MusicHandler) GetPlaylist(ctx *gin.Context) {
 
 	req, err := http.NewRequest("GET", spotifyPlaylistEndpoint, nil)
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 
@@ -182,11 +201,12 @@ func (m *MusicHandler) GetPlaylist(ctx *gin.Context) {
 
 	req.Header.Set("Authorization", authStr)
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 	res, err := client.Do(req)
 	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
+		handleErr(ctx, err)
 		return
 	}
 	defer res.Body.Close()
@@ -206,64 +226,10 @@ func (m *MusicHandler) GetPlaylist(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"message": "success", "body": playlist})
 }
 
-// Get playlist tracks
-func (m *MusicHandler) GetPlaylistTracks(ctx *gin.Context) {
-	playlistID, ok := ctx.Params.Get("playlistID")
-	if !ok {
-		ctx.JSON(http.StatusNotFound, gin.H{"error": "playlist not found"})
-		return
-	}
-
-	token, err := m.getSpotifyToken(ctx.Request.Context())
-	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
-		return
-	}
-
-	spotifyPlaylistEndpoint := fmt.Sprintf("https://api.spotify.com/v1/playlists/%s/tracks", playlistID)
-
-	req, err := http.NewRequest("GET", spotifyPlaylistEndpoint, nil)
-	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
-		return
-	}
-
-	authStr := fmt.Sprintf("Bearer %s", token.AccessToken)
-
-	req.Header.Set("Authorization", authStr)
-
-	client := &http.Client{}
-	res, err := client.Do(req)
-	if err != nil {
-		log.Fatal(err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later"})
-		return
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later", "body": string(body)})
-		return
-	}
-
-	fmt.Println(res)
-
-	var tracks []*Track
-	if err := json.NewDecoder(res.Body).Decode(&tracks); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"message": "try later", "error": err})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "success", "body": tracks})
-}
-
 func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 	token, err := m.getSpotifyToken(ctx.Request.Context())
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		handleErr(ctx, err)
 		return
 	}
 
@@ -276,7 +242,7 @@ func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "spotify error"})
+		handleErr(ctx, err)
 		return
 	}
 	defer res.Body.Close()
@@ -289,7 +255,7 @@ func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 
 	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read spotify response"})
+		handleErr(ctx, err)
 		return
 	}
 
@@ -298,7 +264,7 @@ func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 
 	var data RecentlyPlayedResponse
 	if err := json.Unmarshal(bodyBytes, &data); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		handleErr(ctx, err)
 		return
 	}
 
