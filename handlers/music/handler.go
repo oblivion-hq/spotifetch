@@ -50,15 +50,34 @@ func saveToken(rdb *redis.Client, ctx context.Context, key string, token string,
 
 // GET Spotify token
 func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, error) {
-	tokenVal, err := getToken(m.Redis, ctx, "spotify_user_access_token")
+	const tokenKey = "spotify:access_token"
+	const lockKey = "spotify:token:lock"
+
+	tokenVal, err := getToken(m.Redis, ctx, tokenKey)
+	if err != nil {
+		return nil, err
+	}
+	if tokenVal != "" {
+		return &SpotifyToken{AccessToken: tokenVal}, nil
+	}
+
+	ok, err := m.Redis.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
 	if err != nil {
 		return nil, err
 	}
 
+	if !ok {
+		time.Sleep(200 * time.Millisecond)
+		return m.getSpotifyToken(ctx)
+	}
+	defer m.Redis.Del(ctx, lockKey)
+
+	tokenVal, err = getToken(m.Redis, ctx, tokenKey)
+	if err != nil {
+		return nil, err
+	}
 	if tokenVal != "" {
-		return &SpotifyToken{
-			AccessToken: tokenVal,
-		}, nil
+		return &SpotifyToken{AccessToken: tokenVal}, nil
 	}
 
 	clientID := os.Getenv("SPOTIFY_CLIENT_ID")
@@ -85,21 +104,11 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Authorization", getAuthHeader(clientID, clientSecret))
 
-	// lockKey := "spotify:token:lock"
+	client := &http.Client{
+		Timeout: 10 * time.Second,
+	}
 
-	// ok, err := m.Redis.SetNX(ctx, lockKey, "1", 10*time.Second).Result()
-	// if err != nil {
-	// 	return nil, err
-	// }
-
-	// if !ok {
-	// 	time.Sleep(200 * time.Millisecond)
-	// 	return m.getSpotifyToken(ctx)
-	// }
-
-	// defer m.Redis.Del(ctx, lockKey)
-
-	res, err := http.DefaultClient.Do(req)
+	res, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +125,9 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	}
 
 	ttl := time.Duration(token.ExpiresIn-60) * time.Second
-	_ = saveToken(m.Redis, ctx, "spotify_user_access_token", token.AccessToken, ttl)
+	if err := saveToken(m.Redis, ctx, tokenKey, token.AccessToken, ttl); err != nil {
+		return nil, err
+	}
 
 	return &token, nil
 }
