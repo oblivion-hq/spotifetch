@@ -44,10 +44,6 @@ func getToken(rdb *redis.Client, ctx context.Context, key string) (string, error
 	return val, nil
 }
 
-func saveToken(rdb *redis.Client, ctx context.Context, key string, token string, ttl time.Duration) error {
-	return rdb.Set(ctx, key, token, ttl).Err()
-}
-
 // GET Spotify token
 func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, error) {
 	const tokenKey = "spotify:access_token"
@@ -125,7 +121,7 @@ func (m *MusicHandler) getSpotifyToken(ctx context.Context) (*SpotifyToken, erro
 	}
 
 	ttl := time.Duration(token.ExpiresIn-60) * time.Second
-	if err := saveToken(m.Redis, ctx, tokenKey, token.AccessToken, ttl); err != nil {
+	if err := m.Redis.Set(ctx, tokenKey, token.AccessToken, ttl).Err(); err != nil {
 		return nil, err
 	}
 
@@ -137,53 +133,6 @@ func handleErr(ctx *gin.Context, err error) {
 	ctx.JSON(http.StatusInternalServerError, gin.H{
 		"error": "internal server error",
 	})
-}
-
-// GET my playlist
-func (m *MusicHandler) GetMusics(ctx *gin.Context) {
-	token, err := m.getSpotifyToken(ctx.Request.Context())
-	if err != nil {
-		handleErr(ctx, err)
-		return
-	}
-
-	req, err := http.NewRequest(
-		"GET",
-		"https://api.spotify.com/v1/playlists/0cwPcui7aGHkmfHZiD3Hb9",
-		nil,
-	)
-	if err != nil {
-		handleErr(ctx, err)
-		return
-	}
-
-	authStr := fmt.Sprintf("Bearer %s", token.AccessToken)
-
-	req.Header.Set("Authorization", authStr)
-
-	client := &http.Client{
-		Timeout: 10 * time.Second,
-	}
-	res, err := client.Do(req)
-	if err != nil {
-		handleErr(ctx, err)
-		return
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(res.Body)
-		ctx.JSON(http.StatusInternalServerError, gin.H{"error": "try later", "body": string(body)})
-		return
-	}
-
-	var playlist Playlist
-	if err := json.NewDecoder(res.Body).Decode(&playlist); err != nil {
-		ctx.JSON(http.StatusInternalServerError, gin.H{"message": "try later", "error": err})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{"message": "success", "body": playlist})
 }
 
 // GET Playlist by playlistID

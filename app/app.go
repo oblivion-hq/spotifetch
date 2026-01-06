@@ -44,7 +44,6 @@ func (a *App) registerRoutes() {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	a.Router.GET("/musics", musicHandler.GetMusics)
 	a.Router.GET("/musics/:playlistID", musicHandler.GetPlaylist)
 	a.Router.GET("/me/player/recently-played", musicHandler.GetRecentlyPlayedMusic)
 }
