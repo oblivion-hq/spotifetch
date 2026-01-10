@@ -46,4 +46,5 @@ func (a *App) registerRoutes() {
 
 	a.Router.GET("/musics/:playlistID", musicHandler.GetPlaylist)
 	a.Router.GET("/me/player/recently-played", musicHandler.GetRecentlyPlayedMusic)
+	a.Router.GET("/me/player/currently-playing", musicHandler.GetCurrentlyPlayingMusic)
 }

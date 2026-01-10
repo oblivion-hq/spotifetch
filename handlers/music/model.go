@@ -80,3 +80,10 @@ type RecentlyPlayedResponse struct {
 	Limit int                  `json:"limit"`
 	Href  string               `json:"href"`
 }
+
+type CurrentlyPlayingMusicResponse struct {
+	Item       Track       `json:"item"`
+	IsPlaying  bool        `json:"is_playing"`
+	Context    PlayContext `json:"context"`
+	ProgressMs int         `json:"progress_ms"`
+}

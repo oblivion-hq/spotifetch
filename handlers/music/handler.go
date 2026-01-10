@@ -219,9 +219,6 @@ func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 		return
 	}
 
-	log.Println("Spotify recently-played raw response:")
-	log.Println(string(bodyBytes))
-
 	var data RecentlyPlayedResponse
 	if err := json.Unmarshal(bodyBytes, &data); err != nil {
 		handleErr(ctx, err)
@@ -239,5 +236,49 @@ func (m *MusicHandler) GetRecentlyPlayedMusic(ctx *gin.Context) {
 		"track":     item.Track,
 		"played_at": item.PlayedAt,
 		"context":   item.Context,
+	})
+}
+
+func (m *MusicHandler) GetCurrentlyPlayingMusic(ctx *gin.Context) {
+	token, err := m.getSpotifyToken(ctx.Request.Context())
+	if err != nil {
+		handleErr(ctx, err)
+		return
+	}
+
+	req, _ := http.NewRequest(
+		"GET",
+		"https://api.spotify.com/v1/me/player/currently-playing",
+		nil,
+	)
+	req.Header.Set("Authorization", "Bearer "+token.AccessToken)
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		handleErr(ctx, err)
+		return
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": string(body)})
+		return
+	}
+
+	bodyBytes, err := io.ReadAll(res.Body)
+	if err != nil {
+		handleErr(ctx, err)
+		return
+	}
+
+	var data CurrentlyPlayingMusicResponse
+	if err := json.Unmarshal(bodyBytes, &data); err != nil {
+		handleErr(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"data": data,
 	})
 }
